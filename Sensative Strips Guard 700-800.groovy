@@ -1,17 +1,14 @@
 /*
- *  Sensative Strips Guard 700\800 v0.1
+ *  Sensative Strips Guard 700/800 v1.0
  *
  *
- *  Changelog:
+ *  Changelog:   
  *
-					  
-						   
-  
- *    1.0 (05/12/2021)
+ *    1.0 (24/01/2024)
  *      - Initial Release
  *
  *
- *  Copyright 2023 Sensative
+ *  Copyright 2024 Sensative
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
