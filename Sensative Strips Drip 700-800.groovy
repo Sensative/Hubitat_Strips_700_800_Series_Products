@@ -1,5 +1,5 @@
 /*
- *  Sensative Strips Drip 700/800 v1.0
+ *  Sensative Strips Drip 700/800 v1.1
  *
  *
  *  Changelog:   
@@ -7,6 +7,8 @@
  *    1.0 (24/01/2024)
  *      - Initial Release
  *
+ *    1.1 (25/01/2024)
+ *      - Fix for Supervision Report S2 encapsulation
  *
  *  Copyright 2024 Sensative
  *
@@ -172,14 +174,14 @@ List<String> getConfigureCmds() {
 
 	if (state.pendingRefresh) {
 		cmds << batteryGetCmd()
-		cmds << secureCmd(zwave.versionV3.versionGet())
-		cmds << secureCmd(zwave.sensorMultilevelV11.sensorMultilevelGet(sensorType: tempSensorType))
+		cmds << secure(zwave.versionV3.versionGet())
+		cmds << secure(zwave.sensorMultilevelV11.sensorMultilevelGet(sensorType: tempSensorType))
 	}
 
 	if (state.pendingRefresh || (state.wakeUpInterval != wakeUpIntervalSeconds)) {
 		logDebug "Changing wake up interval to ${wakeUpIntervalSeconds} seconds"
-		cmds << secureCmd(zwave.wakeUpV2.wakeUpIntervalSet(seconds:wakeUpIntervalSeconds, nodeid:zwaveHubNodeId))
-		cmds << secureCmd(zwave.wakeUpV2.wakeUpIntervalGet())
+		cmds << secure(zwave.wakeUpV2.wakeUpIntervalSet(seconds:wakeUpIntervalSeconds, nodeid:zwaveHubNodeId))
+		cmds << secure(zwave.wakeUpV2.wakeUpIntervalGet())
 	}
 
 	configParams.each {
@@ -225,29 +227,16 @@ void logForceWakeupMessage(String msg) {
 	log.warn "${msg}  To force the device to wake up immediately, move the magnet towards the round end 3 times."
 }
 
-
 String batteryGetCmd() {
-	return secureCmd(zwave.batteryV1.batteryGet())
+	return secure(zwave.batteryV1.batteryGet())
 }
 
 String configSetCmd(Map param, int value) {
-	return secureCmd(zwave.configurationV4.configurationSet(parameterNumber: param.num, size: param.size, scaledConfigurationValue: value))
+	return secure(zwave.configurationV4.configurationSet(parameterNumber: param.num, size: param.size, scaledConfigurationValue: value))
 }
 
 String configGetCmd(Map param) {
-	return secureCmd(zwave.configurationV4.configurationGet(parameterNumber: param.num))
-}
-
-String secureCmd(cmd) {
-	try {
-		if (zwaveInfo?.zw?.contains("s")) {
-			return zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
-		} else {
-			return cmd.format()
-		}
-	} catch (ex) {
-		return cmd.format()
-	}
+	return secure(zwave.configurationV4.configurationGet(parameterNumber: param.num))
 }
 
 void sendCommands(List<String> cmds, Long delay = 300) {
@@ -307,7 +296,7 @@ def zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     if (encapCmd) {
         zwaveEvent(encapCmd)
     }
-    sendHubCommand(new hubitat.device.HubAction(zwaveSecureEncap(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format()), hubitat.device.Protocol.ZWAVE))
+    sendHubCommand(new hubitat.device.HubAction(secure(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), hubitat.device.Protocol.ZWAVE))
 }
 
 
@@ -323,7 +312,7 @@ void zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpNotification cmd) {
 		cmds << batteryGetCmd()
 	}
 
-	cmds << secureCmd(zwave.wakeUpV2.wakeUpNoMoreInformation())
+	cmds << secure(zwave.wakeUpV2.wakeUpNoMoreInformation())
 	sendCommands(cmds)
 }
 
@@ -406,6 +395,30 @@ void zwaveEvent(hubitat.zwave.Command cmd) {
 	logDebug "${cmd}"
 }
 
+String secure(hubitat.zwave.Command cmd) {
+    if (getDataValue("zwaveSecurePairingComplete") != "true") {
+        return cmd.format()
+    }
+    Short S2 = getDataValue("S2")?.toInteger()
+    String encap = ""
+    if (S2 == null) { 
+        //S0 existing device
+        encap = "988100"
+    } else if ((S2 & 0x04) == 0x04) { 
+        //S2_ACCESS_CONTROL
+        encap = "9F0304"
+    } else if ((S2 & 0x02) == 0x02) { 
+        //S2_AUTHENTICATED
+        encap = "9F0302"
+    } else if ((S2 & 0x01) == 0x01) { 
+        //S2_UNAUTHENTICATED
+        encap = "9F0301"
+    } else if ((S2 & 0x80) == 0x80) { 
+        //S0 on C7
+        encap = "988100"
+    }
+    return "${encap}${cmd.format()}"
+}
 
 void refreshSyncStatus() {
 	int changes = pendingChanges

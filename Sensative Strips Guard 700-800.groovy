@@ -1,5 +1,5 @@
 /*
- *  Sensative Strips Guard 700/800 v1.0
+ *  Sensative Strips Guard 700/800 v1.1
  *
  *
  *  Changelog:   
@@ -7,6 +7,8 @@
  *    1.0 (24/01/2024)
  *      - Initial Release
  *
+ *    1.1 (25/01/2024)
+ *      - Fix for Supervision Report S2 encapsulation
  *
  *  Copyright 2024 Sensative
  *
@@ -51,11 +53,6 @@ import groovy.transform.Field
 @Field static int accessControl = 6
 @Field static int accessControlOpen = 22
 @Field static int accessControlClosed = 23
-							   
-								   
-								  
-								
-								   
 @Field static int homeSecurity = 7
 @Field static int homeSecurityOpen = 2
 @Field static int homeSecurityTamper = 11
@@ -68,8 +65,7 @@ metadata {
 		author: "Kevin LaFramboise & Dhiraj Paryani"
 	) {
 		capability "Sensor"
-		capability "Contact Sensor"
-									  
+		capability "Contact Sensor"									  
 		capability "Tamper Alert"
 		capability "Battery"
 		capability "Configuration"
@@ -91,7 +87,7 @@ metadata {
 				title: "${param.name}:",
 				required: false,
 				displayDuringSetup: false,
-				options: param.options
+				options: param.options	
 		}
 
 		input "debugLogging", "enum",
@@ -130,7 +126,7 @@ void initialize() {
 	}
 
 	if (!device.currentValue("contact")) {
-		sendEventIfNew("contact", "open")											  
+		sendEventIfNew("contact", "open")										  
 	}
 
 	if (!device.currentValue("checkInterval")) {
@@ -157,32 +153,26 @@ List<String> getConfigureCmds() {
 
 	if (state.pendingRefresh) {
 		cmds << batteryGetCmd()
-		cmds << secureCmd(zwave.versionV1.versionGet())
-		cmds << secureCmd(zwave.sensorBinaryV1.sensorBinaryGet())
+		cmds << secure(zwave.versionV3.versionGet())
+		cmds << secure(zwave.sensorBinaryV1.sensorBinaryGet())
 	}
 
 	if (state.pendingRefresh || (state.wakeUpInterval != wakeUpIntervalSeconds)) {
 		logDebug "Changing wake up interval to ${wakeUpIntervalSeconds} seconds"
-		cmds << secureCmd(zwave.wakeUpV2.wakeUpIntervalSet(seconds:wakeUpIntervalSeconds, nodeid:zwaveHubNodeId))
-		cmds << secureCmd(zwave.wakeUpV2.wakeUpIntervalGet())
+		cmds << secure(zwave.wakeUpV2.wakeUpIntervalSet(seconds:wakeUpIntervalSeconds, nodeid:zwaveHubNodeId))
+		cmds << secure(zwave.wakeUpV2.wakeUpIntervalGet())
 	}
 
 	configParams.each {
 		Integer storedVal = getParamStoredValue(it.num)
 		Integer settingVal = getSettingValue(it.num)
-
 											 
 		if ((settingVal != null) && (settingVal != storedVal)) {
 			logDebug "CHANGING ${it.name}(#${it.num}) from ${storedVal} to ${settingVal}"
-			cmds << secureCmd(zwave.configurationV4.configurationSet(parameterNumber: it.num, size: it.size, scaledConfigurationValue: settingVal))
-							
-									 
+			cmds << configSetCmd(it, settingVal)
 			cmds << configGetCmd(it)
-	
-		  
-		} else if (state.pendingRefresh) {							 
-										
-			cmds << configGetCmd(it)	
+		} else if (state.pendingRefresh) {
+			cmds << configGetCmd(it)
 		}
 	}
 
@@ -209,30 +199,16 @@ void logForceWakeupMessage(String msg) {
 
 
 String batteryGetCmd() {
-	return secureCmd(zwave.batteryV1.batteryGet())
+	return secure(zwave.batteryV1.batteryGet())																																	 
 }
 
-										   
-																																		
- 
+String configSetCmd(Map param, int value) {
+	return secure(zwave.configurationV4.configurationSet(parameterNumber: param.num, size: param.size, scaledConfigurationValue: value))
+}
 
 String configGetCmd(Map param) {
-	return secureCmd(zwave.configurationV4.configurationGet(parameterNumber: param.num))
+	return secure(zwave.configurationV4.configurationGet(parameterNumber: param.num))
 }
-
-String secureCmd(cmd) {
-	try {
-		if (zwaveInfo?.zw?.contains("s")) {
-			return zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
-		} else {
-			return cmd.format()
-		}
-	} catch (ex) {
-		return cmd.format()
-	}
-}
-
-
 
 void sendCommands(List<String> cmds, Long delay = 300) {
     sendHubCommand(new hubitat.device.HubMultiAction(commands(cmds, delay), hubitat.device.Protocol.ZWAVE))
@@ -241,10 +217,6 @@ void sendCommands(List<String> cmds, Long delay = 300) {
 List<String> commands(List<String> cmds, Long delay = 300) {
     return delayBetween(cmds.collect { zwaveSecureEncap(it) }, delay)
 }
-
-															
-																	 
- 
 
 def parse(String description) {
 	def cmd = zwave.parse(description, commandClassVersions)
@@ -296,7 +268,7 @@ def zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {
     if (encapCmd) {
         zwaveEvent(encapCmd)
     }
-    sendHubCommand(new hubitat.device.HubAction(zwaveSecureEncap(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0).format()), hubitat.device.Protocol.ZWAVE))
+    sendHubCommand(new hubitat.device.HubAction(secure(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), hubitat.device.Protocol.ZWAVE))
 }
 
 
@@ -312,7 +284,7 @@ void zwaveEvent(hubitat.zwave.commands.wakeupv2.WakeUpNotification cmd) {
 		cmds << batteryGetCmd()
 	}
 
-	cmds << secureCmd(zwave.wakeUpV2.wakeUpNoMoreInformation())
+	cmds << secure(zwave.wakeUpV2.wakeUpNoMoreInformation())
 	sendCommands(cmds)
 }
 
@@ -347,7 +319,7 @@ void zwaveEvent(hubitat.zwave.commands.configurationv4.ConfigurationReport cmd) 
 	Map param = configParams.find { it.num == cmd.parameterNumber }
 	if (param) {
 		logDebug "${param.name}(#${param.num}) = ${cmd.scaledConfigurationValue}"
-		setParamStoredValue(param.num, cmd.scaledConfigurationValue)   
+		setParamStoredValue(param.num, cmd.scaledConfigurationValue)     
 	} else {
 		logDebug "Unknown Parameter #${cmd.parameterNumber} = ${cmd.scaledConfigurationValue}"
 	}
@@ -359,17 +331,14 @@ void zwaveEvent(hubitat.zwave.commands.sensorbinaryv1.SensorBinaryReport cmd) {
 	sendContactEvent(cmd.sensorValue)
 }
 
-
 void zwaveEvent(hubitat.zwave.commands.notificationv8.NotificationReport cmd) {
 	logDebug "${cmd}"
 	switch (cmd.notificationType) {
 		case accessControl:
 			if ((cmd.event == accessControlOpen) || (cmd.event == accessControlClosed)) {
-				sendContactEvent(cmd.event == accessControlOpen)
-																					   
-																						
+				sendContactEvent(cmd.event == accessControlOpen)						
 			}
-			break														  
+			break													  
 		
 		case homeSecurity:
 			if ((cmd.event == homeSecurityTamper) || (cmd.eventParameter[0] == homeSecurityTamper)) {
@@ -393,7 +362,31 @@ void sendTamperEvent(rawVal) {
 void zwaveEvent(hubitat.zwave.Command cmd) {
 	logDebug "${cmd}"
 }
-
+									
+String secure(hubitat.zwave.Command cmd) {
+    if (getDataValue("zwaveSecurePairingComplete") != "true") {
+        return cmd.format()
+    }
+    Short S2 = getDataValue("S2")?.toInteger()
+    String encap = ""
+    if (S2 == null) { 
+        //S0 existing device
+        encap = "988100"
+    } else if ((S2 & 0x04) == 0x04) { 
+        //S2_ACCESS_CONTROL
+        encap = "9F0304"
+    } else if ((S2 & 0x02) == 0x02) { 
+        //S2_AUTHENTICATED
+        encap = "9F0302"
+    } else if ((S2 & 0x01) == 0x01) { 
+        //S2_UNAUTHENTICATED
+        encap = "9F0301"
+    } else if ((S2 & 0x80) == 0x80) { 
+        //S0 on C7
+        encap = "988100"
+    }
+    return "${encap}${cmd.format()}"
+} 
 
 void refreshSyncStatus() {
 	int changes = pendingChanges
@@ -402,7 +395,7 @@ void refreshSyncStatus() {
 
 int getPendingChanges() {
 												   
-	return safeToInt(configParams.count { ((getSettingValue(it.num) != null) && (getSettingValue(it.num) != getParamStoredValue(it.num))) }) + ((state.wakeUpInterval != wakeUpIntervalSeconds) ? 1 : 0) 																				   
+	return safeToInt(configParams.count { ((getSettingValue(it.num) != null) && (getSettingValue(it.num) != getParamStoredValue(it.num))) }) + ((state.wakeUpInterval != wakeUpIntervalSeconds) ? 1 : 0)																				   
 }
 
 Integer getSettingValue(int paramNum) {
@@ -424,14 +417,14 @@ void sendEventIfNew(String name, value, boolean displayed=true) {
 		if (name != "syncStatus") {
 			logDebug(desc)
 		}
-		sendEvent(name: name, value: value, descriptionText: desc, displayed: displayed)				
+		sendEvent(name: name, value: value, descriptionText: desc, displayed: displayed)
 	}
 }
 
 
 List<Map> getConfigParams() {
 	return [
-		ledAlarmParam,	
+		ledAlarmParam,		
 		activateSupervisionParam
 	]
 }
@@ -440,11 +433,9 @@ Map getLedAlarmParam() {
 	return [num: 2, name: "LED alarm event reporting", size: 1, options: [0: "Turns off LED for door open events", 1:"On [DEFAULT]"]]
 }
 
-
 Map getActivateSupervisionParam() {
 	return [num:15, name:"Activate Supervision", size:1, options:[0:"Off", 1:"Alarm Report [DEFAULT]", 2:"All Reports"]]
-}		  
-
+}
 
 Integer safeToInt(val, Integer defaultVal=0) {
 	if ("${val}"?.isInteger()) {
