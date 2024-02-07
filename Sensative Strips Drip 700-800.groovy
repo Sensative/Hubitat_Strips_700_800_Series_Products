@@ -1,5 +1,5 @@
 /*
- *  Sensative Strips Drip 700/800 v1.1
+ *  Sensative Strips Drip 700/800 v1.2
  *
  *
  *  Changelog:   
@@ -9,6 +9,9 @@
  *
  *    1.1 (25/01/2024)
  *      - Fix for Supervision Report S2 encapsulation
+ *
+ *    1.2 (07/02/2024)
+ *      - Fix delayed Supervision Report S2 encapsulation
  *
  *  Copyright 2024 Sensative
  *
@@ -292,11 +295,12 @@ void zwaveEvent(hubitat.zwave.commands.securityv1.SecurityMessageEncapsulation c
 
 
 def zwaveEvent(hubitat.zwave.commands.supervisionv1.SupervisionGet cmd) {    
+	sendHubCommand(new hubitat.device.HubAction(secure(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), hubitat.device.Protocol.ZWAVE))
+	
     hubitat.zwave.Command encapCmd = cmd.encapsulatedCommand(commandClassVersions)
     if (encapCmd) {
         zwaveEvent(encapCmd)
-    }
-    sendHubCommand(new hubitat.device.HubAction(secure(zwave.supervisionV1.supervisionReport(sessionID: cmd.sessionID, reserved: 0, moreStatusUpdates: false, status: 0xFF, duration: 0)), hubitat.device.Protocol.ZWAVE))
+    }    
 }
 
 
